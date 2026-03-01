@@ -20,7 +20,8 @@
         "NSPhotoLibraryUsageDescription": "需要访问相册以上传商品图片",
         "NSCameraUsageDescription": "需要访问相机以拍摄商品图片"
       },
-      "buildNumber": "3"
+      "buildNumber": "5",
+      "appleTeamId": "Y5SP92H4XE"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +30,9 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["android.permission.RECORD_AUDIO"],
+      "package": "com.runa.clothsale"
     },
     "web": {
       "bundler": "metro",
@@ -53,7 +56,7 @@
     "updates": {
       "url": "https://u.expo.dev/93f30720-ebe8-41e8-bdb1-a0544b2153b4"
     },
-    "runtimeVersion": "carl-production-3",
+    "runtimeVersion": "carl-production-5",
     "extra": {
       "router": {},
       "eas": {
