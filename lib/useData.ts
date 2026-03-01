@@ -190,7 +190,9 @@ export function useStockRecords(filter?: 'all' | 'in' | 'out', productId?: strin
   const [error, setError] = useState<Error | null>(null);
 
   const fetchRecords = useCallback(async () => {
+    console.log('[useStockRecords] Fetching records, store:', store?.id, 'filter:', filter);
     if (!store?.id) {
+      console.log('[useStockRecords] No store ID, skipping fetch');
       setRecords([]);
       setLoading(false);
       return;
@@ -217,6 +219,7 @@ export function useStockRecords(filter?: 'all' | 'in' | 'out', productId?: strin
 
       const { data, error } = await query;
 
+      console.log('[useStockRecords] Query result:', { count: data?.length, error });
       if (error) throw error;
       setRecords(data || []);
     } catch (err) {
@@ -312,6 +315,7 @@ export function useProductMutations() {
 
   const createProduct = async (input: CreateProductInput): Promise<{ data: Product | null; error: Error | null }> => {
     if (!store?.id) return { data: null, error: new Error('未找到店铺') };
+    if (!profile) return { data: null, error: new Error('未找到用户信息') };
 
     try {
       setLoading(true);
@@ -325,6 +329,35 @@ export function useProductMutations() {
         .single();
 
       if (error) throw error;
+
+      console.log('[createProduct] Product created:', data?.id, 'stock:', input.stock);
+
+      // Create stock record for initial stock
+      if (data && input.stock && input.stock > 0) {
+        console.log('[createProduct] Creating stock record for product:', data.id);
+        const { error: recordError } = await supabase
+          .from('stock_records')
+          .insert({
+            store_id: store.id,
+            product_id: data.id,
+            type: '入库',
+            quantity: input.stock,
+            unit_price: input.cost_price || 0,
+            total_amount: input.stock * (input.cost_price || 0),
+            stock_before: 0,
+            stock_after: input.stock,
+            operator_id: profile.id,
+            operator_name: profile.name,
+            note: '新品入库',
+          });
+
+        if (recordError) {
+          console.error('[createProduct] Failed to create stock record:', recordError);
+        } else {
+          console.log('[createProduct] Stock record created successfully');
+        }
+      }
+
       return { data, error: null };
     } catch (err) {
       return { data: null, error: err as Error };

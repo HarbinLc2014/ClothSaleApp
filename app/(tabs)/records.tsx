@@ -114,11 +114,11 @@ export default function RecordsScreen() {
                   />
                 </View>
 
-                {record.product?.image_url ? (
+                {(record.product?.image_urls?.[0] || record.product?.image_url) ? (
                   <Image
-                    source={{ uri: record.product.image_url }}
+                    source={{ uri: record.product?.image_urls?.[0] || record.product?.image_url }}
                     style={styles.recordImage}
-                    defaultSource={require('@/assets/images/icon.png')}
+                    resizeMode="cover"
                   />
                 ) : (
                   <View style={[styles.recordImage, styles.recordImagePlaceholder]}>

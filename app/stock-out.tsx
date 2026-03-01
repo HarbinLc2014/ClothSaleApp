@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
-import { useProducts, useProductMutations } from '@/lib/useData';
+import { useProducts, useProductMutations, useCategories } from '@/lib/useData';
 import { useAuth } from '@/lib/auth';
 import { Product, StockOutType } from '@/lib/types';
+
+const PAGE_SIZE = 20;
 
 const outTypes: StockOutType[] = ['零售售出', '批发拿货', '调货', '退货'];
 
@@ -27,6 +30,7 @@ export default function StockOutScreen() {
   const { id } = useLocalSearchParams();
   const { store } = useAuth();
   const { products, loading: productsLoading, refetch } = useProducts();
+  const { categories } = useCategories();
   const { stockOut, loading: mutationLoading } = useProductMutations();
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -39,7 +43,40 @@ export default function StockOutScreen() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [error, setError] = useState('');
 
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
+
   const lowStockThreshold = store?.low_stock_threshold || 10;
+
+  // Filter and search products
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => {
+      const matchesSearch = !searchQuery ||
+        product.style_no.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.color?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = !selectedCategoryId || product.category_id === selectedCategoryId;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, searchQuery, selectedCategoryId]);
+
+  // Paginated products for display
+  const displayedProducts = useMemo(() => {
+    return filteredProducts.slice(0, displayCount);
+  }, [filteredProducts, displayCount]);
+
+  const loadMore = useCallback(() => {
+    if (displayCount < filteredProducts.length) {
+      setDisplayCount(prev => Math.min(prev + PAGE_SIZE, filteredProducts.length));
+    }
+  }, [displayCount, filteredProducts.length]);
+
+  // Reset display count when filter changes
+  useEffect(() => {
+    setDisplayCount(PAGE_SIZE);
+  }, [searchQuery, selectedCategoryId]);
 
   useEffect(() => {
     if (id && products.length > 0) {
@@ -130,13 +167,70 @@ export default function StockOutScreen() {
           {!selectedProduct ? (
             <View style={styles.formGroup}>
               <Text style={styles.label}>选择商品 <Text style={styles.required}>*</Text></Text>
+
+              {/* Search Bar */}
+              <View style={styles.searchContainer}>
+                <Ionicons name="search" size={18} color={Colors.gray[400]} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="搜索款号、名称、颜色"
+                  placeholderTextColor={Colors.gray[400]}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <Ionicons name="close-circle" size={18} color={Colors.gray[400]} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Category Filter */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.categoryScroll}
+                contentContainerStyle={styles.categoryContainer}
+              >
+                <TouchableOpacity
+                  style={[styles.categoryButton, !selectedCategoryId && styles.categoryButtonActive]}
+                  onPress={() => setSelectedCategoryId(null)}
+                >
+                  <Text style={[styles.categoryButtonText, !selectedCategoryId && styles.categoryButtonTextActive]}>
+                    全部
+                  </Text>
+                </TouchableOpacity>
+                {categories.map((cat) => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[styles.categoryButton, selectedCategoryId === cat.id && styles.categoryButtonActive]}
+                    onPress={() => setSelectedCategoryId(cat.id)}
+                  >
+                    <Text style={[styles.categoryButtonText, selectedCategoryId === cat.id && styles.categoryButtonTextActive]}>
+                      {cat.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Results count */}
+              <Text style={styles.resultsCount}>
+                共 {filteredProducts.length} 件商品 {displayCount < filteredProducts.length && `(显示 ${displayCount} 件)`}
+              </Text>
+
               {products.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyText}>暂无商品，请先添加库存</Text>
                 </View>
+              ) : filteredProducts.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>未找到匹配的商品</Text>
+                </View>
               ) : (
                 <View style={styles.productList}>
-                  {products.map((product) => (
+                  {displayedProducts.map((product) => {
+                    const displayImage = product.image_urls?.[0] || product.image_url || product.video_thumbnails?.[0];
+                    return (
                     <TouchableOpacity
                       key={product.id}
                       style={styles.productItem}
@@ -145,9 +239,9 @@ export default function StockOutScreen() {
                         setFormData({ ...formData, price: product.selling_price.toString() });
                       }}
                     >
-                      {product.image_url ? (
+                      {displayImage ? (
                         <Image
-                          source={{ uri: product.image_url }}
+                          source={{ uri: displayImage }}
                           style={styles.productImage}
                           defaultSource={require('@/assets/images/icon.png')}
                         />
@@ -175,18 +269,26 @@ export default function StockOutScreen() {
                         </View>
                       </View>
                     </TouchableOpacity>
-                  ))}
+                  )})}
+                  {displayCount < filteredProducts.length && (
+                    <TouchableOpacity style={styles.loadMoreButton} onPress={loadMore}>
+                      <Text style={styles.loadMoreText}>加载更多 ({filteredProducts.length - displayCount} 件)</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
             </View>
           ) : (
             <View style={styles.formGroup}>
               <Text style={styles.label}>已选商品</Text>
+              {(() => {
+                const selectedDisplayImage = selectedProduct.image_urls?.[0] || selectedProduct.image_url || selectedProduct.video_thumbnails?.[0];
+                return (
               <View style={styles.selectedProductCard}>
                 <View style={styles.selectedProductRow}>
-                  {selectedProduct.image_url ? (
+                  {selectedDisplayImage ? (
                     <Image
-                      source={{ uri: selectedProduct.image_url }}
+                      source={{ uri: selectedDisplayImage }}
                       style={styles.selectedProductImage}
                       defaultSource={require('@/assets/images/icon.png')}
                     />
@@ -216,6 +318,8 @@ export default function StockOutScreen() {
                   <Text style={styles.reselectButtonText}>重新选择</Text>
                 </TouchableOpacity>
               </View>
+                );
+              })()}
             </View>
           )}
 
@@ -387,6 +491,52 @@ const styles = StyleSheet.create({
   required: {
     color: Colors.red,
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.gray[50],
+    borderWidth: 1,
+    borderColor: Colors.gray[200],
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: Colors.gray[900],
+  },
+  categoryScroll: {
+    marginBottom: 8,
+    marginHorizontal: -4,
+  },
+  categoryContainer: {
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  categoryButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.gray[100],
+  },
+  categoryButtonActive: {
+    backgroundColor: Colors.orange,
+  },
+  categoryButtonText: {
+    fontSize: 13,
+    color: Colors.gray[600],
+  },
+  categoryButtonTextActive: {
+    color: Colors.white,
+  },
+  resultsCount: {
+    fontSize: 12,
+    color: Colors.gray[500],
+    marginBottom: 8,
+  },
   emptyState: {
     padding: 24,
     alignItems: 'center',
@@ -397,6 +547,17 @@ const styles = StyleSheet.create({
   },
   productList: {
     gap: 8,
+  },
+  loadMoreButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: Colors.gray[100],
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  loadMoreText: {
+    fontSize: 13,
+    color: Colors.orange,
   },
   productItem: {
     backgroundColor: Colors.gray[50],

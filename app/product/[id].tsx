@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,41 +8,109 @@ import {
   Image,
   SafeAreaView,
   Dimensions,
+  ActivityIndicator,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
+import { useProducts, useStockRecords } from '@/lib/useData';
+import { calculateProfit } from '@/lib/utils';
 
 const { width } = Dimensions.get('window');
 
-const product = {
-  id: '1',
-  image: 'https://images.unsplash.com/photo-1711516141938-cc5917435dcd?w=800',
-  styleNo: 'CQ2024001',
-  name: '春季新款连衣裙',
-  category: '连衣裙',
-  season: '春',
-  size: 'M',
-  color: '粉色',
-  stock: 25,
-  price: 299,
-  costPrice: 180,
-  lastStockIn: '2026-03-01 10:30',
-  lastStockOut: '2026-03-01 14:20',
-  description: '优质面料，舒适透气，适合春季穿着',
-};
-
-const stockHistory = [
-  { id: 1, type: '入库', quantity: 20, price: 180, time: '2026-03-01 10:30', operator: '店员A', isStockIn: true },
-  { id: 2, type: '零售售出', quantity: 2, price: 299, time: '2026-03-01 14:20', operator: '店长', isStockIn: false },
-  { id: 3, type: '批发拿货', quantity: 5, price: 250, time: '2026-02-28 16:45', operator: '店员B', isStockIn: false },
-  { id: 4, type: '入库', quantity: 12, price: 180, time: '2026-02-25 09:15', operator: '店长', isStockIn: true },
-];
+interface MediaItem {
+  type: 'image' | 'video';
+  url: string;
+  thumbnail?: string; // For videos
+}
 
 export default function ProductDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
+  const mediaScrollRef = useRef<ScrollView>(null);
+  const { products, loading } = useProducts();
+  const { records, loading: recordsLoading } = useStockRecords();
+
+  const product = products.find(p => p.id === id);
+  const productRecords = records.filter(r => r.product_id === id).slice(0, 20);
+
+  // Build media items array (images + videos)
+  const mediaItems = useMemo<MediaItem[]>(() => {
+    if (!product) return [];
+    const items: MediaItem[] = [];
+
+    // Add images
+    if (product.image_urls?.length) {
+      product.image_urls.forEach(url => {
+        items.push({ type: 'image', url });
+      });
+    } else if (product.image_url) {
+      items.push({ type: 'image', url: product.image_url });
+    }
+
+    // Add videos with thumbnails
+    if (product.video_urls?.length) {
+      product.video_urls.forEach((url, index) => {
+        items.push({
+          type: 'video',
+          url,
+          thumbnail: product.video_thumbnails?.[index] || '',
+        });
+      });
+    }
+
+    return items;
+  }, [product]);
+
+  // Handle banner scroll
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(offsetX / width);
+    setCurrentMediaIndex(index);
+  };
+
+  // Handle media item tap
+  const handleMediaTap = (item: MediaItem) => {
+    if (item.type === 'video') {
+      router.push(`/video-player?url=${encodeURIComponent(item.url)}`);
+    }
+  };
+
+  // Calculate profit margin
+  const profitInfo = product
+    ? calculateProfit(product.cost_price, product.selling_price)
+    : { profit: 0, profitRate: 0, profitRateText: '0%' };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!product) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color={Colors.gray[900]} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>商品详情</Text>
+          <View style={styles.editButton} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.notFoundText}>商品不存在</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -58,38 +126,101 @@ export default function ProductDetailScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Product Image */}
-        <Image
-          source={{ uri: product.image }}
-          style={styles.productImage}
-          resizeMode="cover"
-        />
+        {/* Media Banner */}
+        {mediaItems.length > 0 ? (
+          <View style={styles.mediaBannerContainer}>
+            <ScrollView
+              ref={mediaScrollRef}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+            >
+              {mediaItems.map((item, index) => (
+                <TouchableOpacity
+                  key={index}
+                  activeOpacity={item.type === 'video' ? 0.8 : 1}
+                  onPress={() => handleMediaTap(item)}
+                  style={styles.mediaSlide}
+                >
+                  <Image
+                    source={{ uri: item.type === 'image' ? item.url : item.thumbnail || '' }}
+                    style={styles.productImage}
+                    resizeMode="cover"
+                  />
+                  {item.type === 'video' && (
+                    <View style={styles.videoOverlay}>
+                      <View style={styles.playButton}>
+                        <Ionicons name="play" size={40} color={Colors.white} />
+                      </View>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            {/* Page Indicators */}
+            {mediaItems.length > 1 && (
+              <View style={styles.pageIndicators}>
+                {mediaItems.map((_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.pageIndicator,
+                      index === currentMediaIndex && styles.pageIndicatorActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+            {/* Media Counter */}
+            <View style={styles.mediaCounter}>
+              <Text style={styles.mediaCounterText}>
+                {currentMediaIndex + 1}/{mediaItems.length}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.productImage, styles.productImagePlaceholder]}>
+            <Ionicons name="shirt-outline" size={64} color={Colors.gray[300]} />
+          </View>
+        )}
 
         <View style={styles.content}>
           {/* Style No & Name */}
           <View style={styles.titleSection}>
             <View style={styles.badges}>
               <View style={styles.styleNoBadge}>
-                <Text style={styles.styleNoText}>{product.styleNo}</Text>
+                <Text style={styles.styleNoText}>{product.style_no}</Text>
               </View>
-              <View style={styles.categoryBadge}>
-                <Text style={styles.categoryText}>{product.category}</Text>
-              </View>
+              {product.category && (
+                <View style={styles.categoryBadge}>
+                  <Text style={styles.categoryText}>{product.category.name}</Text>
+                </View>
+              )}
             </View>
             <Text style={styles.productName}>{product.name}</Text>
-            <Text style={styles.productDesc}>{product.description}</Text>
+            {product.description && (
+              <Text style={styles.productDesc}>{product.description}</Text>
+            )}
           </View>
 
-          {/* Price & Stock */}
+          {/* Price & Stock & Profit */}
           <View style={styles.priceCard}>
             <View style={styles.priceRow}>
               <View style={styles.priceItem}>
                 <Text style={styles.priceLabel}>售价</Text>
-                <Text style={styles.priceValue}>¥{product.price}</Text>
+                <Text style={styles.priceValue}>¥{product.selling_price}</Text>
               </View>
               <View style={styles.priceItem}>
                 <Text style={styles.priceLabel}>成本</Text>
-                <Text style={styles.costValue}>¥{product.costPrice}</Text>
+                <Text style={styles.costValue}>¥{product.cost_price}</Text>
+              </View>
+              <View style={styles.priceItem}>
+                <Text style={styles.priceLabel}>利润率</Text>
+                <Text style={[styles.profitValue, profitInfo.profitRate < 0 && styles.profitValueNegative]}>
+                  {profitInfo.profitRateText}
+                </Text>
               </View>
             </View>
             <View style={styles.priceRow}>
@@ -98,8 +229,16 @@ export default function ProductDetailScreen() {
                 <Text style={styles.stockValue}>{product.stock} 件</Text>
               </View>
               <View style={styles.priceItem}>
-                <Text style={styles.priceLabel}>预计总值</Text>
-                <Text style={styles.costValue}>¥{product.price * product.stock}</Text>
+                <Text style={styles.priceLabel}>单件利润</Text>
+                <Text style={[styles.profitAmount, profitInfo.profit < 0 && styles.profitAmountNegative]}>
+                  ¥{profitInfo.profit.toFixed(0)}
+                </Text>
+              </View>
+              <View style={styles.priceItem}>
+                <Text style={styles.priceLabel}>预计利润</Text>
+                <Text style={[styles.profitAmount, profitInfo.profit < 0 && styles.profitAmountNegative]}>
+                  ¥{(profitInfo.profit * product.stock).toFixed(0)}
+                </Text>
               </View>
             </View>
           </View>
@@ -108,26 +247,19 @@ export default function ProductDetailScreen() {
           <View style={styles.detailsSection}>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>尺码</Text>
-              <Text style={styles.detailValue}>{product.size}</Text>
+              <Text style={styles.detailValue}>{product.size || '-'}</Text>
             </View>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>颜色</Text>
-              <View style={styles.colorValue}>
-                <View style={[styles.colorDot, { backgroundColor: '#ffc0cb' }]} />
-                <Text style={styles.detailValue}>{product.color}</Text>
-              </View>
+              <Text style={styles.detailValue}>{product.color || '-'}</Text>
             </View>
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>季节</Text>
-              <Text style={styles.detailValue}>{product.season}</Text>
-            </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>最近入库</Text>
-              <Text style={styles.detailValue}>{product.lastStockIn}</Text>
+              <Text style={styles.detailLabel}>年份</Text>
+              <Text style={styles.detailValue}>{product.year || '-'}</Text>
             </View>
             <View style={[styles.detailRow, styles.detailRowLast]}>
-              <Text style={styles.detailLabel}>最近出库</Text>
-              <Text style={styles.detailValue}>{product.lastStockOut}</Text>
+              <Text style={styles.detailLabel}>季节</Text>
+              <Text style={styles.detailValue}>{product.season}</Text>
             </View>
           </View>
 
@@ -160,37 +292,55 @@ export default function ProductDetailScreen() {
 
           {activeTab === 'history' && (
             <View style={styles.historyList}>
-              {stockHistory.map((record) => (
-                <View key={record.id} style={styles.historyCard}>
-                  <View style={[styles.historyIcon, record.isStockIn ? styles.stockInIcon : styles.stockOutIcon]}>
-                    <Ionicons
-                      name={record.isStockIn ? 'trending-up' : 'trending-down'}
-                      size={20}
-                      color={record.isStockIn ? Colors.green : Colors.orange}
-                    />
-                  </View>
-                  <View style={styles.historyContent}>
-                    <View style={styles.historyHeader}>
-                      <View style={[styles.historyBadge, record.isStockIn ? styles.historyBadgeIn : styles.historyBadgeOut]}>
-                        <Text style={[styles.historyBadgeText, record.isStockIn ? styles.historyBadgeTextIn : styles.historyBadgeTextOut]}>
-                          {record.type}
-                        </Text>
-                      </View>
-                      <Text style={[styles.historyQuantity, record.isStockIn ? styles.quantityIn : styles.quantityOut]}>
-                        {record.isStockIn ? '+' : '-'}{record.quantity}件
-                      </Text>
-                    </View>
-                    <Text style={styles.historyPrice}>单价: ¥{record.price}</Text>
-                    <View style={styles.historyMeta}>
-                      <View style={styles.historyTime}>
-                        <Ionicons name="time-outline" size={12} color={Colors.gray[400]} />
-                        <Text style={styles.historyTimeText}>{record.time}</Text>
-                      </View>
-                      <Text style={styles.historyOperator}>操作人: {record.operator}</Text>
-                    </View>
-                  </View>
+              {recordsLoading ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : productRecords.length === 0 ? (
+                <View style={styles.emptyHistory}>
+                  <Ionicons name="document-text-outline" size={32} color={Colors.gray[300]} />
+                  <Text style={styles.emptyHistoryText}>暂无出入库记录</Text>
                 </View>
-              ))}
+              ) : (
+                productRecords.map((record) => {
+                  const isStockIn = record.type === '入库';
+                  return (
+                    <View key={record.id} style={styles.historyCard}>
+                      <View style={[styles.historyIcon, isStockIn ? styles.stockInIcon : styles.stockOutIcon]}>
+                        <Ionicons
+                          name={isStockIn ? 'trending-up' : 'trending-down'}
+                          size={20}
+                          color={isStockIn ? Colors.green : Colors.orange}
+                        />
+                      </View>
+                      <View style={styles.historyContent}>
+                        <View style={styles.historyHeader}>
+                          <View style={[styles.historyBadge, isStockIn ? styles.historyBadgeIn : styles.historyBadgeOut]}>
+                            <Text style={[styles.historyBadgeText, isStockIn ? styles.historyBadgeTextIn : styles.historyBadgeTextOut]}>
+                              {record.type}
+                            </Text>
+                          </View>
+                          <Text style={[styles.historyQuantity, isStockIn ? styles.quantityIn : styles.quantityOut]}>
+                            {isStockIn ? '+' : '-'}{record.quantity}件
+                          </Text>
+                        </View>
+                        {record.unit_price && (
+                          <Text style={styles.historyPrice}>单价: ¥{record.unit_price}</Text>
+                        )}
+                        <View style={styles.historyMeta}>
+                          <View style={styles.historyTime}>
+                            <Ionicons name="time-outline" size={12} color={Colors.gray[400]} />
+                            <Text style={styles.historyTimeText}>
+                              {new Date(record.created_at).toLocaleString('zh-CN')}
+                            </Text>
+                          </View>
+                          {record.operator_name && (
+                            <Text style={styles.historyOperator}>操作人: {record.operator_name}</Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </View>
           )}
         </View>
@@ -223,6 +373,75 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.white,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notFoundText: {
+    fontSize: 15,
+    color: Colors.gray[500],
+  },
+  productImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.gray[100],
+  },
+  mediaBannerContainer: {
+    position: 'relative',
+  },
+  mediaSlide: {
+    width: width,
+    position: 'relative',
+  },
+  videoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  playButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 4,
+  },
+  pageIndicators: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  pageIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  pageIndicatorActive: {
+    backgroundColor: Colors.white,
+    width: 18,
+  },
+  mediaCounter: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  mediaCounterText: {
+    color: Colors.white,
+    fontSize: 12,
+    fontWeight: '500',
   },
   header: {
     flexDirection: 'row',
@@ -334,6 +553,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.gray[900],
   },
+  profitValue: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: Colors.green,
+  },
+  profitValueNegative: {
+    color: Colors.red,
+  },
+  profitAmount: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.green,
+  },
+  profitAmountNegative: {
+    color: Colors.red,
+  },
   detailsSection: {
     marginBottom: 20,
   },
@@ -401,6 +636,15 @@ const styles = StyleSheet.create({
   },
   historyList: {
     gap: 10,
+  },
+  emptyHistory: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyHistoryText: {
+    fontSize: 14,
+    color: Colors.gray[400],
+    marginTop: 8,
   },
   historyCard: {
     backgroundColor: Colors.gray[50],

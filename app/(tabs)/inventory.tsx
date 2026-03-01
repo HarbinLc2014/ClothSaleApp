@@ -17,22 +17,38 @@ import { Colors } from '@/constants/Colors';
 import { useProducts, useCategories } from '@/lib/useData';
 import { useAuth } from '@/lib/auth';
 import { Category } from '@/lib/types';
+import { calculateProfit } from '@/lib/utils';
 
-const colorMap: { [key: string]: string } = {
-  '白色': '#fff',
-  '粉色': '#ffc0cb',
-  '深蓝': '#00008b',
-  '黑色': '#000',
-  '碎花': '#e0e0e0',
-  '红色': '#dc2626',
-  '蓝色': '#3b82f6',
-  '绿色': '#22c55e',
-  '黄色': '#eab308',
-  '灰色': '#6b7280',
-  '米色': '#f5f5dc',
-  '紫色': '#a855f7',
-  '橙色': '#f97316',
-  '卡其': '#c3b091',
+// Color mapping with keywords for fuzzy matching
+const colorDefinitions: { keywords: string[]; color: string }[] = [
+  { keywords: ['白', '白色', '米白', '乳白'], color: '#fff' },
+  { keywords: ['粉', '粉色', '粉红', '桃粉'], color: '#ffc0cb' },
+  { keywords: ['深蓝', '藏蓝', '宝蓝', '藏青', '藏青色'], color: '#00008b' },
+  { keywords: ['黑', '黑色'], color: '#000' },
+  { keywords: ['碎花', '花色', '印花'], color: '#e0e0e0' },
+  { keywords: ['红', '红色', '大红', '酒红', '枣红'], color: '#dc2626' },
+  { keywords: ['蓝', '蓝色', '天蓝', '浅蓝'], color: '#3b82f6' },
+  { keywords: ['绿', '绿色', '军绿', '草绿', '墨绿'], color: '#22c55e' },
+  { keywords: ['黄', '黄色', '姜黄', '鹅黄'], color: '#eab308' },
+  { keywords: ['灰', '灰色', '深灰', '浅灰'], color: '#6b7280' },
+  { keywords: ['米', '米色', '杏色', '驼色'], color: '#f5f5dc' },
+  { keywords: ['紫', '紫色', '葡萄紫'], color: '#a855f7' },
+  { keywords: ['橙', '橙色', '橘色', '橘红'], color: '#f97316' },
+  { keywords: ['卡其', '棕', '棕色', '咖啡', '咖色'], color: '#c3b091' },
+  { keywords: ['杏', '杏粉'], color: '#fadadd' },
+  { keywords: ['藕', '藕粉', '藕荷'], color: '#e8ccd7' },
+];
+
+// Get color by matching keywords
+const getColorByName = (colorName: string | null): string => {
+  if (!colorName) return '#e0e0e0';
+  const lowerName = colorName.toLowerCase();
+  for (const def of colorDefinitions) {
+    if (def.keywords.some(k => lowerName.includes(k) || k.includes(lowerName))) {
+      return def.color;
+    }
+  }
+  return '#e0e0e0'; // default gray
 };
 
 export default function InventoryScreen() {
@@ -145,18 +161,32 @@ export default function InventoryScreen() {
 
           {filteredProducts.map((product) => {
             const isLowStock = product.stock < lowStockThreshold;
+            const { profitRateText, profitRate } = calculateProfit(product.cost_price, product.selling_price);
+            // Use first image, fallback to video thumbnail
+            const hasImage = product.image_urls?.[0] || product.image_url;
+            const hasVideo = product.video_urls?.[0];
+            const videoThumbnail = product.video_thumbnails?.[0];
+            const displayImage = hasImage || videoThumbnail;
+            const isVideo = !hasImage && hasVideo;
             return (
               <TouchableOpacity
                 key={product.id}
                 style={styles.productCard}
                 onPress={() => router.push(`/product/${product.id}`)}
               >
-                {product.image_url ? (
-                  <Image
-                    source={{ uri: product.image_url }}
-                    style={styles.productImage}
-                    defaultSource={require('@/assets/images/icon.png')}
-                  />
+                {displayImage ? (
+                  <View style={styles.productImageContainer}>
+                    <Image
+                      source={{ uri: displayImage }}
+                      style={styles.productImage}
+                      resizeMode="cover"
+                    />
+                    {isVideo && (
+                      <View style={styles.videoIndicator}>
+                        <Ionicons name="videocam" size={14} color={Colors.white} />
+                      </View>
+                    )}
+                  </View>
                 ) : (
                   <View style={[styles.productImage, styles.productImagePlaceholder]}>
                     <Ionicons name="shirt-outline" size={32} color={Colors.gray[300]} />
@@ -181,14 +211,18 @@ export default function InventoryScreen() {
                     <Text style={styles.productSize}>{product.size}</Text>
                     <Text style={styles.metaSeparator}>|</Text>
                     <View style={styles.colorInfo}>
-                      <View style={[styles.colorDot, { backgroundColor: colorMap[product.color] || '#e0e0e0' }]} />
+                      <View style={[styles.colorDot, { backgroundColor: getColorByName(product.color) }]} />
                       <Text style={styles.productColor}>{product.color}</Text>
                     </View>
                   </View>
                   <View style={styles.productBottom}>
                     <View style={styles.priceInfo}>
                       <Text style={styles.price}>¥{product.selling_price}</Text>
-                      <Text style={styles.costPrice}>成本 ¥{product.cost_price}</Text>
+                      <View style={[styles.profitBadge, profitRate < 0 && styles.profitBadgeNegative]}>
+                        <Text style={[styles.profitText, profitRate < 0 && styles.profitTextNegative]}>
+                          {profitRateText}
+                        </Text>
+                      </View>
                     </View>
                     <Text style={[styles.stock, isLowStock && styles.stockLow]}>
                       库存: {product.stock}件
@@ -321,6 +355,9 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  productImageContainer: {
+    position: 'relative',
+  },
   productImage: {
     width: 96,
     height: 96,
@@ -330,6 +367,14 @@ const styles = StyleSheet.create({
   productImagePlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  videoIndicator: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 4,
+    padding: 2,
   },
   productInfo: {
     flex: 1,
@@ -410,17 +455,30 @@ const styles = StyleSheet.create({
   },
   priceInfo: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
+    alignItems: 'center',
+    gap: 6,
   },
   price: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.primary,
   },
-  costPrice: {
-    fontSize: 12,
-    color: Colors.gray[400],
+  profitBadge: {
+    backgroundColor: Colors.greenLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  profitBadgeNegative: {
+    backgroundColor: Colors.redLight,
+  },
+  profitText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: Colors.green,
+  },
+  profitTextNegative: {
+    color: Colors.red,
   },
   stock: {
     fontSize: 13,

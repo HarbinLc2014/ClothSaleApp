@@ -17,16 +17,24 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import { Colors } from '@/constants/Colors';
 import { useProductMutations, useProducts, useCategories } from '@/lib/useData';
 import { useAuth } from '@/lib/auth';
-import { uploadProductImage } from '@/lib/supabase';
+import { uploadProductMedia } from '@/lib/supabase';
 import { ProductSeason, ProductSize } from '@/lib/types';
+import { calculateProfit } from '@/lib/utils';
 
 const sizes: ProductSize[] = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'F'];
 const seasons: ProductSeason[] = ['春', '夏', '秋', '冬'];
 const currentYear = new Date().getFullYear();
-const years: number[] = [currentYear - 1, currentYear, currentYear + 1];
+// Year range from 2020 to 2030
+const years: number[] = Array.from({ length: 11 }, (_, i) => 2020 + i);
+
+interface VideoItem {
+  uri: string;
+  thumbnail: string;
+}
 
 interface Variant {
   id: string;
@@ -34,7 +42,8 @@ interface Variant {
   color: string;
   quantity: string;
   sellingPrice: string;  // Each variant can have different selling price
-  imageUri: string | null;  // Each color can have different image
+  imageUris: string[];   // Multiple images per variant
+  videos: VideoItem[];   // Multiple videos with thumbnails per variant
   expanded: boolean;
 }
 
@@ -63,9 +72,9 @@ export default function StockInScreen() {
     note: '',
   });
 
-  // Multiple variants (size/color/quantity/price/image combinations)
+  // Multiple variants (size/color/quantity/price/images/videos combinations)
   const [variants, setVariants] = useState<Variant[]>([
-    { id: generateId(), size: 'M', color: '', quantity: '', sellingPrice: '', imageUri: null, expanded: true },
+    { id: generateId(), size: 'M', color: '', quantity: '', sellingPrice: '', imageUris: [], videos: [], expanded: true },
   ]);
 
   // For existing product mode
@@ -80,7 +89,7 @@ export default function StockInScreen() {
   const addVariant = () => {
     setVariants([
       ...variants,
-      { id: generateId(), size: 'M', color: '', quantity: '', sellingPrice: '', imageUri: null, expanded: true },
+      { id: generateId(), size: 'M', color: '', quantity: '', sellingPrice: '', imageUris: [], videos: [], expanded: true },
     ]);
   };
 
@@ -106,7 +115,6 @@ export default function StockInScreen() {
 
   const pickImage = async (variantId: string) => {
     try {
-      // Request permission
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('权限不足', '需要相册访问权限才能选择图片');
@@ -115,17 +123,144 @@ export default function StockInScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
+        allowsMultipleSelection: true,  // Allow selecting multiple images
         quality: 0.8,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        updateVariant(variantId, 'imageUri', result.assets[0].uri);
+      if (!result.canceled && result.assets.length > 0) {
+        const variant = variants.find(v => v.id === variantId);
+        if (variant) {
+          const newUris = result.assets.map(a => a.uri);
+          updateVariant(variantId, 'imageUris', [...variant.imageUris, ...newUris]);
+        }
       }
     } catch (error) {
       console.error('[stock-in] Image picker error:', error);
       Alert.alert('选择图片失败', '请重试');
+    }
+  };
+
+  const removeImage = (variantId: string, index: number) => {
+    const variant = variants.find(v => v.id === variantId);
+    if (variant) {
+      const newUris = variant.imageUris.filter((_, i) => i !== index);
+      updateVariant(variantId, 'imageUris', newUris);
+    }
+  };
+
+  const takePhoto = async (variantId: string) => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('权限不足', '需要相机访问权限才能拍照');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const variant = variants.find(v => v.id === variantId);
+        if (variant) {
+          const newUris = result.assets.map(a => a.uri);
+          updateVariant(variantId, 'imageUris', [...variant.imageUris, ...newUris]);
+        }
+      }
+    } catch (error) {
+      console.error('[stock-in] Camera photo error:', error);
+      Alert.alert('拍照失败', '请重试');
+    }
+  };
+
+  const recordVideo = async (variantId: string) => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('权限不足', '需要相机访问权限才能录制视频');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        quality: 0.8,
+        videoMaxDuration: 60, // Max 60 seconds
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const variant = variants.find(v => v.id === variantId);
+        if (variant) {
+          const newVideos: VideoItem[] = [];
+          for (const asset of result.assets) {
+            try {
+              const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+                time: 1000,
+              });
+              newVideos.push({ uri: asset.uri, thumbnail: thumbnailUri });
+            } catch (e) {
+              console.warn('[stock-in] Thumbnail generation failed:', e);
+              newVideos.push({ uri: asset.uri, thumbnail: '' });
+            }
+          }
+          updateVariant(variantId, 'videos', [...variant.videos, ...newVideos]);
+        }
+      }
+    } catch (error) {
+      console.error('[stock-in] Camera video error:', error);
+      Alert.alert('录制视频失败', '请重试');
+    }
+  };
+
+  const pickVideo = async (variantId: string) => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('权限不足', '需要相册访问权限才能选择视频');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const variant = variants.find(v => v.id === variantId);
+        if (variant) {
+          // Generate thumbnails for each video
+          const newVideos: VideoItem[] = [];
+          for (const asset of result.assets) {
+            try {
+              const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+                time: 1000,  // Get thumbnail at 1 second
+              });
+              newVideos.push({ uri: asset.uri, thumbnail: thumbnailUri });
+            } catch (e) {
+              // If thumbnail generation fails, use empty string
+              console.warn('[stock-in] Thumbnail generation failed:', e);
+              newVideos.push({ uri: asset.uri, thumbnail: '' });
+            }
+          }
+          updateVariant(variantId, 'videos', [...variant.videos, ...newVideos]);
+        }
+      }
+    } catch (error) {
+      console.error('[stock-in] Video picker error:', error);
+      Alert.alert('选择视频失败', '请重试');
+    }
+  };
+
+  const removeVideo = (variantId: string, index: number) => {
+    const variant = variants.find(v => v.id === variantId);
+    if (variant) {
+      const newVideos = variant.videos.filter((_, i) => i !== index);
+      updateVariant(variantId, 'videos', newVideos);
     }
   };
 
@@ -173,24 +308,73 @@ export default function StockInScreen() {
 
       // Create products for each variant
       for (const variant of validVariants) {
-        // Upload image if exists
-        let imageUrl: string | undefined;
-        if (variant.imageUri) {
-          setUploadingImage(variant.id);
-          const { url, error: uploadError } = await uploadProductImage(
-            variant.imageUri,
-            store.id,
-            `${formData.styleNo}_${variant.color}_${variant.size}`
-          );
-          setUploadingImage(null);
+        // Upload all images
+        const imageUrls: string[] = [];
+        const videoUrls: string[] = [];
+        const videoThumbnails: string[] = [];
 
-          if (uploadError) {
-            console.error('[stock-in] Image upload error:', uploadError);
-            Alert.alert('图片上传失败', `${variant.size} ${variant.color}: ${uploadError.message}`);
-            hasError = true;
-            break;
+        if (variant.imageUris.length > 0) {
+          setUploadingImage(variant.id);
+          for (const uri of variant.imageUris) {
+            const { url, error: uploadError } = await uploadProductMedia(
+              uri,
+              store.id,
+              'image'
+            );
+
+            if (uploadError) {
+              console.error('[stock-in] Image upload error:', uploadError);
+              Alert.alert('图片上传失败', `${variant.size} ${variant.color}: ${uploadError.message}`);
+              hasError = true;
+              break;
+            }
+            if (url) imageUrls.push(url);
           }
-          imageUrl = url || undefined;
+          setUploadingImage(null);
+          if (hasError) break;
+        }
+
+        // Upload all videos and their thumbnails
+        if (variant.videos.length > 0) {
+          setUploadingImage(variant.id);
+          for (const video of variant.videos) {
+            // Upload video
+            const { url: videoUrl, error: videoError } = await uploadProductMedia(
+              video.uri,
+              store.id,
+              'video'
+            );
+
+            if (videoError) {
+              console.error('[stock-in] Video upload error:', videoError);
+              Alert.alert('视频上传失败', `${variant.size} ${variant.color}: ${videoError.message}`);
+              hasError = true;
+              break;
+            }
+
+            // Upload thumbnail if available
+            let thumbnailUrl = '';
+            if (video.thumbnail) {
+              const { url: thumbUrl, error: thumbError } = await uploadProductMedia(
+                video.thumbnail,
+                store.id,
+                'image'
+              );
+              if (thumbError) {
+                console.warn('[stock-in] Thumbnail upload failed:', thumbError);
+                // Continue without thumbnail
+              } else if (thumbUrl) {
+                thumbnailUrl = thumbUrl;
+              }
+            }
+
+            if (videoUrl) {
+              videoUrls.push(videoUrl);
+              videoThumbnails.push(thumbnailUrl);
+            }
+          }
+          setUploadingImage(null);
+          if (hasError) break;
         }
 
         const sellingPrice = variant.sellingPrice
@@ -208,7 +392,9 @@ export default function StockInScreen() {
           cost_price: parseFloat(formData.costPrice),
           selling_price: sellingPrice,
           stock: parseInt(variant.quantity),
-          image_url: imageUrl,
+          image_urls: imageUrls.length > 0 ? imageUrls : undefined,
+          video_urls: videoUrls.length > 0 ? videoUrls : undefined,
+          video_thumbnails: videoThumbnails.length > 0 ? videoThumbnails : undefined,
         });
 
         if (createError) {
@@ -284,7 +470,7 @@ export default function StockInScreen() {
       note: '',
     });
     setVariants([
-      { id: generateId(), size: 'M', color: '', quantity: '', sellingPrice: '', imageUri: null, expanded: true },
+      { id: generateId(), size: 'M', color: '', quantity: '', sellingPrice: '', imageUris: [], videos: [], expanded: true },
     ]);
     setSelectedProductId(null);
     setExistingQuantity('');
@@ -457,29 +643,35 @@ export default function StockInScreen() {
               {/* Year & Season */}
               <View style={styles.formGroup}>
                 <Text style={styles.label}>年份季节</Text>
-                <View style={styles.yearSeasonRow}>
-                  <View style={styles.yearGroup}>
-                    {years.map((year) => (
-                      <TouchableOpacity
-                        key={year}
+                {/* Year Selector - Horizontal Scroll */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.yearScrollView}
+                  contentContainerStyle={styles.yearScrollContent}
+                >
+                  {years.map((year) => (
+                    <TouchableOpacity
+                      key={year}
+                      style={[
+                        styles.yearButton,
+                        formData.year === year && styles.yearButtonActive,
+                      ]}
+                      onPress={() => setFormData({ ...formData, year })}
+                    >
+                      <Text
                         style={[
-                          styles.yearButton,
-                          formData.year === year && styles.yearButtonActive,
+                          styles.yearButtonText,
+                          formData.year === year && styles.yearButtonTextActive,
                         ]}
-                        onPress={() => setFormData({ ...formData, year })}
                       >
-                        <Text
-                          style={[
-                            styles.yearButtonText,
-                            formData.year === year && styles.yearButtonTextActive,
-                          ]}
-                        >
-                          {year}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <View style={styles.seasonGroup}>
+                        {year}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                {/* Season Selector */}
+                <View style={styles.seasonGroup}>
                     {seasons.map((season) => (
                       <TouchableOpacity
                         key={season}
@@ -500,7 +692,6 @@ export default function StockInScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
-                </View>
               </View>
 
               {/* Cost Price & Default Selling Price */}
@@ -534,7 +725,26 @@ export default function StockInScreen() {
                   </View>
                 </View>
               </View>
-              <Text style={styles.priceHint}>售价可在每个规格中单独设置，未设置时使用默认售价</Text>
+              {formData.costPrice && formData.defaultSellingPrice ? (
+                <View style={styles.profitPreview}>
+                  <Text style={styles.profitPreviewLabel}>默认利润率：</Text>
+                  <Text style={[
+                    styles.profitPreviewValue,
+                    calculateProfit(parseFloat(formData.costPrice), parseFloat(formData.defaultSellingPrice)).profitRate < 0 && styles.profitPreviewValueNegative
+                  ]}>
+                    {calculateProfit(parseFloat(formData.costPrice), parseFloat(formData.defaultSellingPrice)).profitRateText}
+                  </Text>
+                  <Text style={styles.profitPreviewLabel}>  单件利润：</Text>
+                  <Text style={[
+                    styles.profitPreviewValue,
+                    calculateProfit(parseFloat(formData.costPrice), parseFloat(formData.defaultSellingPrice)).profit < 0 && styles.profitPreviewValueNegative
+                  ]}>
+                    ¥{calculateProfit(parseFloat(formData.costPrice), parseFloat(formData.defaultSellingPrice)).profit.toFixed(0)}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.priceHint}>售价可在每个规格中单独设置，未设置时使用默认售价</Text>
+              )}
 
               {/* Variants Section */}
               <View style={styles.sectionHeader}>
@@ -561,9 +771,16 @@ export default function StockInScreen() {
                       </Text>
                     </View>
                     <View style={styles.variantHeaderRight}>
-                      {variant.imageUri && (
-                        <View style={styles.variantImageIndicator}>
-                          <Ionicons name="image" size={14} color={Colors.green} />
+                      {variant.imageUris.length > 0 && (
+                        <View style={styles.variantMediaIndicator}>
+                          <Ionicons name="image" size={12} color={Colors.green} />
+                          <Text style={styles.mediaCountText}>{variant.imageUris.length}</Text>
+                        </View>
+                      )}
+                      {variant.videos.length > 0 && (
+                        <View style={styles.variantMediaIndicator}>
+                          <Ionicons name="videocam" size={12} color={Colors.primary} />
+                          <Text style={styles.mediaCountText}>{variant.videos.length}</Text>
                         </View>
                       )}
                       {variants.length > 1 && (
@@ -585,30 +802,85 @@ export default function StockInScreen() {
                   {/* Variant Content (Expanded) */}
                   {variant.expanded && (
                     <View style={styles.variantContent}>
-                      {/* Image Upload */}
+                      {/* Images Upload */}
                       <View style={styles.variantField}>
-                        <Text style={styles.variantLabel}>商品图片（该颜色）</Text>
-                        <TouchableOpacity
-                          style={styles.imageUploadArea}
-                          onPress={() => pickImage(variant.id)}
-                        >
-                          {variant.imageUri ? (
-                            <View style={styles.imagePreviewContainer}>
-                              <Image source={{ uri: variant.imageUri }} style={styles.imagePreview} />
-                              <TouchableOpacity
-                                style={styles.removeImageButton}
-                                onPress={() => updateVariant(variant.id, 'imageUri', null)}
-                              >
-                                <Ionicons name="close-circle" size={24} color={Colors.red} />
-                              </TouchableOpacity>
-                            </View>
-                          ) : (
-                            <View style={styles.imageUploadPlaceholder}>
-                              <Ionicons name="camera-outline" size={32} color={Colors.gray[400]} />
-                              <Text style={styles.imageUploadText}>点击上传图片</Text>
-                            </View>
-                          )}
-                        </TouchableOpacity>
+                        <Text style={styles.variantLabel}>
+                          商品图片 {variant.imageUris.length > 0 && `(${variant.imageUris.length}张)`}
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaScrollView}>
+                          <View style={styles.mediaRow}>
+                            <TouchableOpacity
+                              style={styles.addMediaButton}
+                              onPress={() => takePhoto(variant.id)}
+                            >
+                              <Ionicons name="camera" size={24} color={Colors.gray[400]} />
+                              <Text style={styles.addMediaText}>拍照</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.addMediaButton}
+                              onPress={() => pickImage(variant.id)}
+                            >
+                              <Ionicons name="images" size={24} color={Colors.gray[400]} />
+                              <Text style={styles.addMediaText}>相册</Text>
+                            </TouchableOpacity>
+                            {variant.imageUris.map((uri, imgIndex) => (
+                              <View key={imgIndex} style={styles.mediaItem}>
+                                <Image source={{ uri }} style={styles.mediaThumb} />
+                                <TouchableOpacity
+                                  style={styles.removeMediaBtn}
+                                  onPress={() => removeImage(variant.id, imgIndex)}
+                                >
+                                  <Ionicons name="close-circle" size={20} color={Colors.red} />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        </ScrollView>
+                      </View>
+
+                      {/* Videos Upload */}
+                      <View style={styles.variantField}>
+                        <Text style={styles.variantLabel}>
+                          商品视频 {variant.videos.length > 0 && `(${variant.videos.length}个)`}
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaScrollView}>
+                          <View style={styles.mediaRow}>
+                            <TouchableOpacity
+                              style={styles.addMediaButton}
+                              onPress={() => recordVideo(variant.id)}
+                            >
+                              <Ionicons name="videocam" size={24} color={Colors.gray[400]} />
+                              <Text style={styles.addMediaText}>录制</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.addMediaButton}
+                              onPress={() => pickVideo(variant.id)}
+                            >
+                              <Ionicons name="film" size={24} color={Colors.gray[400]} />
+                              <Text style={styles.addMediaText}>相册</Text>
+                            </TouchableOpacity>
+                            {variant.videos.map((video, vidIndex) => (
+                              <View key={vidIndex} style={styles.mediaItem}>
+                                {video.thumbnail ? (
+                                  <Image source={{ uri: video.thumbnail }} style={styles.mediaThumb} />
+                                ) : (
+                                  <View style={styles.videoThumbFallback}>
+                                    <Ionicons name="videocam" size={24} color={Colors.primary} />
+                                  </View>
+                                )}
+                                <View style={styles.videoPlayIcon}>
+                                  <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.9)" />
+                                </View>
+                                <TouchableOpacity
+                                  style={styles.removeMediaBtn}
+                                  onPress={() => removeVideo(variant.id, vidIndex)}
+                                >
+                                  <Ionicons name="close-circle" size={20} color={Colors.red} />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        </ScrollView>
                       </View>
 
                       {/* Size */}
@@ -972,17 +1244,17 @@ const styles = StyleSheet.create({
   sizeButtonTextActive: {
     color: Colors.white,
   },
-  yearSeasonRow: {
-    flexDirection: 'row',
-    gap: 12,
+  yearScrollView: {
+    marginBottom: 12,
+    marginHorizontal: -4,
   },
-  yearGroup: {
-    flexDirection: 'row',
-    gap: 6,
+  yearScrollContent: {
+    paddingHorizontal: 4,
+    gap: 8,
   },
   yearButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 8,
     backgroundColor: Colors.gray[100],
     alignItems: 'center',
@@ -999,8 +1271,7 @@ const styles = StyleSheet.create({
   },
   seasonGroup: {
     flexDirection: 'row',
-    flex: 1,
-    gap: 6,
+    gap: 8,
   },
   seasonButton: {
     flex: 1,
@@ -1066,6 +1337,27 @@ const styles = StyleSheet.create({
     color: Colors.gray[400],
     marginBottom: 20,
   },
+  profitPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.greenLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  profitPreviewLabel: {
+    fontSize: 12,
+    color: Colors.gray[600],
+  },
+  profitPreviewValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.green,
+  },
+  profitPreviewValueNegative: {
+    color: Colors.red,
+  },
   textArea: {
     backgroundColor: Colors.gray[50],
     borderWidth: 1,
@@ -1122,13 +1414,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  variantImageIndicator: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: Colors.greenLight,
-    justifyContent: 'center',
+  variantMediaIndicator: {
+    flexDirection: 'row',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: Colors.gray[100],
     alignItems: 'center',
+    gap: 2,
   },
   removeVariantButton: {
     padding: 4,
@@ -1156,38 +1449,70 @@ const styles = StyleSheet.create({
     color: Colors.gray[600],
     marginBottom: 8,
   },
-  imageUploadArea: {
-    height: 120,
-    borderRadius: 12,
+  mediaScrollView: {
+    marginHorizontal: -4,
+  },
+  mediaRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 4,
+    gap: 10,
+  },
+  mediaItem: {
+    width: 90,
+    height: 90,
+    borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: Colors.gray[50],
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: Colors.gray[300],
-  },
-  imageUploadPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  imageUploadText: {
-    fontSize: 13,
-    color: Colors.gray[400],
-    marginTop: 6,
-  },
-  imagePreviewContainer: {
-    flex: 1,
     position: 'relative',
+    backgroundColor: Colors.gray[100],
   },
-  imagePreview: {
+  mediaThumb: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
-  removeImageButton: {
+  videoThumbFallback: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+  },
+  videoPlayIcon: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeMediaBtn: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: Colors.white,
+    borderRadius: 10,
+  },
+  addMediaButton: {
+    width: 90,
+    height: 90,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: Colors.gray[300],
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.gray[50],
+  },
+  addMediaText: {
+    fontSize: 11,
+    color: Colors.gray[400],
+    marginTop: 4,
+  },
+  mediaCountText: {
+    fontSize: 10,
+    color: Colors.gray[600],
+    marginLeft: 2,
   },
   addVariantButton: {
     flexDirection: 'row',

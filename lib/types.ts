@@ -47,7 +47,11 @@ export interface Product {
   selling_price: number;
   stock: number;
   low_stock_threshold: number;
-  image_url: string | null;
+  image_url: string | null;          // Legacy single image (deprecated)
+  video_url: string | null;          // Legacy single video (deprecated)
+  image_urls: string[] | null;       // Multiple images
+  video_urls: string[] | null;       // Multiple videos
+  video_thumbnails: string[] | null; // Thumbnails for videos (parallel array)
   description: string | null;
   is_active: boolean;
   created_at: string;
@@ -92,7 +96,9 @@ export interface CreateProductInput {
   selling_price: number;
   stock?: number;
   low_stock_threshold?: number;
-  image_url?: string;
+  image_urls?: string[];
+  video_urls?: string[];
+  video_thumbnails?: string[];
   description?: string;
 }
 
