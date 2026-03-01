@@ -68,6 +68,7 @@ CREATE TABLE products (
   style_no TEXT NOT NULL,
   name TEXT NOT NULL,
   category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
+  year INTEGER,
   season product_season DEFAULT '四季',
   size TEXT,
   color TEXT,
@@ -79,8 +80,7 @@ CREATE TABLE products (
   description TEXT,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(store_id, style_no)
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 出入库类型枚举

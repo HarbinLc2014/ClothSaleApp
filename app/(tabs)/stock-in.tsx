@@ -25,6 +25,8 @@ import { ProductSeason, ProductSize } from '@/lib/types';
 
 const sizes: ProductSize[] = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'F'];
 const seasons: ProductSeason[] = ['春', '夏', '秋', '冬'];
+const currentYear = new Date().getFullYear();
+const years: number[] = [currentYear - 1, currentYear, currentYear + 1];
 
 interface Variant {
   id: string;
@@ -56,6 +58,7 @@ export default function StockInScreen() {
     categoryId: '',
     costPrice: '',
     defaultSellingPrice: '',  // Default selling price, can be overridden per variant
+    year: currentYear,
     season: '春' as ProductSeason,
     note: '',
   });
@@ -200,6 +203,7 @@ export default function StockInScreen() {
           category_id: formData.categoryId || undefined,
           size: variant.size,
           color: variant.color.trim(),
+          year: formData.year,
           season: formData.season,
           cost_price: parseFloat(formData.costPrice),
           selling_price: sellingPrice,
@@ -275,6 +279,7 @@ export default function StockInScreen() {
       categoryId: '',
       costPrice: '',
       defaultSellingPrice: '',
+      year: currentYear,
       season: '春',
       note: '',
     });
@@ -449,29 +454,52 @@ export default function StockInScreen() {
                 </View>
               </View>
 
-              {/* Season */}
+              {/* Year & Season */}
               <View style={styles.formGroup}>
-                <Text style={styles.label}>季节</Text>
-                <View style={styles.seasonGroup}>
-                  {seasons.map((season) => (
-                    <TouchableOpacity
-                      key={season}
-                      style={[
-                        styles.seasonButton,
-                        formData.season === season && styles.seasonButtonActive,
-                      ]}
-                      onPress={() => updateFormData('season', season)}
-                    >
-                      <Text
+                <Text style={styles.label}>年份季节</Text>
+                <View style={styles.yearSeasonRow}>
+                  <View style={styles.yearGroup}>
+                    {years.map((year) => (
+                      <TouchableOpacity
+                        key={year}
                         style={[
-                          styles.seasonButtonText,
-                          formData.season === season && styles.seasonButtonTextActive,
+                          styles.yearButton,
+                          formData.year === year && styles.yearButtonActive,
                         ]}
+                        onPress={() => setFormData({ ...formData, year })}
                       >
-                        {season}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={[
+                            styles.yearButtonText,
+                            formData.year === year && styles.yearButtonTextActive,
+                          ]}
+                        >
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={styles.seasonGroup}>
+                    {seasons.map((season) => (
+                      <TouchableOpacity
+                        key={season}
+                        style={[
+                          styles.seasonButton,
+                          formData.season === season && styles.seasonButtonActive,
+                        ]}
+                        onPress={() => updateFormData('season', season)}
+                      >
+                        <Text
+                          style={[
+                            styles.seasonButtonText,
+                            formData.season === season && styles.seasonButtonTextActive,
+                          ]}
+                        >
+                          {season}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
               </View>
 
@@ -944,9 +972,35 @@ const styles = StyleSheet.create({
   sizeButtonTextActive: {
     color: Colors.white,
   },
+  yearSeasonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  yearGroup: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  yearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.gray[100],
+    alignItems: 'center',
+  },
+  yearButtonActive: {
+    backgroundColor: Colors.primary,
+  },
+  yearButtonText: {
+    fontSize: 14,
+    color: Colors.gray[600],
+  },
+  yearButtonTextActive: {
+    color: Colors.white,
+  },
   seasonGroup: {
     flexDirection: 'row',
-    gap: 8,
+    flex: 1,
+    gap: 6,
   },
   seasonButton: {
     flex: 1,

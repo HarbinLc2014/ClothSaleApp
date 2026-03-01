@@ -39,6 +39,7 @@ export interface Product {
   name: string;
   category_id: string | null;
   category?: Category;
+  year: number | null;
   season: ProductSeason;
   size: string | null;
   color: string | null;
@@ -83,6 +84,7 @@ export interface CreateProductInput {
   style_no: string;
   name: string;
   category_id?: string;
+  year?: number;
   season?: ProductSeason;
   size?: string;
   color?: string;

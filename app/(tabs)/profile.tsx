@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -6,9 +7,11 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Updates from 'expo-updates';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/auth';
 
@@ -40,6 +43,40 @@ const menuSections = [
 
 export default function ProfileScreen() {
   const { profile, store, signOut } = useAuth();
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+
+  const handleCheckUpdate = async () => {
+    if (__DEV__) {
+      Alert.alert('开发模式', '热更新在开发模式下不可用，请使用生产构建测试');
+      return;
+    }
+
+    setIsCheckingUpdate(true);
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        Alert.alert('发现新版本', '正在下载更新...', [{ text: '确定' }]);
+        const result = await Updates.fetchUpdateAsync();
+        if (result.isNew) {
+          Alert.alert('更新完成', '应用将重新启动以应用更新', [
+            {
+              text: '立即重启',
+              onPress: async () => {
+                await Updates.reloadAsync();
+              },
+            },
+          ]);
+        }
+      } else {
+        Alert.alert('已是最新版本', '当前已是最新版本，无需更新');
+      }
+    } catch (error) {
+      console.error('检查更新失败:', error);
+      Alert.alert('检查更新失败', '请稍后重试');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('确认退出', '确定要退出登录吗？', [
@@ -130,6 +167,24 @@ export default function ProfileScreen() {
             >
               <Ionicons name="log-out-outline" size={20} color={Colors.red} />
               <Text style={styles.logoutText}>退出登录</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Update Button */}
+          <View style={styles.updateCard}>
+            <TouchableOpacity
+              style={styles.updateButton}
+              onPress={handleCheckUpdate}
+              disabled={isCheckingUpdate}
+            >
+              {isCheckingUpdate ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Ionicons name="cloud-download-outline" size={20} color={Colors.primary} />
+              )}
+              <Text style={styles.updateText}>
+                {isCheckingUpdate ? '检查更新中...' : '检查更新'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -302,6 +357,27 @@ const styles = StyleSheet.create({
   logoutText: {
     fontSize: 15,
     color: Colors.red,
+  },
+  updateCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: 20,
+  },
+  updateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    gap: 8,
+  },
+  updateText: {
+    fontSize: 15,
+    color: Colors.primary,
   },
   versionInfo: {
     alignItems: 'center',

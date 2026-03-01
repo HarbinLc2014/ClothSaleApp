@@ -16,8 +16,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.runa.clothsale",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "需要访问相册以上传商品图片",
+        "NSCameraUsageDescription": "需要访问相机以拍摄商品图片"
+      },
+      "buildNumber": "3"
     },
     "android": {
       "adaptiveIcon": {
@@ -35,10 +38,23 @@
     },
     "plugins": [
       "expo-router",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "需要访问相册以上传商品图片",
+          "cameraPermission": "需要访问相机以拍摄商品图片"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "updates": {
+      "url": "https://u.expo.dev/93f30720-ebe8-41e8-bdb1-a0544b2153b4"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     },
     "extra": {
       "router": {},
