@@ -1,57 +1,77 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import 'react-native-reanimated';
-
-import { useColorScheme } from '@/components/useColorScheme';
-
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
-
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
-};
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
-
-export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
-
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
-  if (!loaded) {
-    return null;
-  }
-
-  return <RootLayoutNav />;
-}
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { AuthProvider, useAuth } from '@/lib/auth';
+import { Colors } from '@/constants/Colors';
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  const { session, loading, needsProfileCompletion } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+
+    const inAuthGroup = segments[0] === 'login';
+    const inCompleteProfile = segments[0] === 'complete-profile';
+
+    if (!session && !inAuthGroup) {
+      // Redirect to login if not authenticated
+      router.replace('/login');
+    } else if (session && needsProfileCompletion && !inCompleteProfile) {
+      // Redirect to complete profile if profile is incomplete
+      router.replace('/complete-profile');
+    } else if (session && !needsProfileCompletion && (inAuthGroup || inCompleteProfile)) {
+      // Redirect to home if authenticated and profile is complete
+      router.replace('/(tabs)');
+    }
+  }, [session, loading, needsProfileCompletion, segments]);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+    <>
+      <StatusBar style="auto" />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="login" />
+        <Stack.Screen name="complete-profile" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="product/[id]" options={{ presentation: 'card' }} />
+        <Stack.Screen name="stock-out" options={{ presentation: 'card' }} />
+        <Stack.Screen name="low-stock" options={{ presentation: 'card' }} />
+        <Stack.Screen name="store-info" options={{ presentation: 'card' }} />
+        <Stack.Screen name="staff" options={{ presentation: 'card' }} />
+        <Stack.Screen name="threshold" options={{ presentation: 'card' }} />
+        <Stack.Screen name="my-info" options={{ presentation: 'card' }} />
+        <Stack.Screen name="my-records" options={{ presentation: 'card' }} />
+        <Stack.Screen name="settings" options={{ presentation: 'card' }} />
+        <Stack.Screen name="categories" options={{ presentation: 'card' }} />
       </Stack>
-    </ThemeProvider>
+    </>
   );
 }
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <RootLayoutNav />
+    </AuthProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+  },
+});
