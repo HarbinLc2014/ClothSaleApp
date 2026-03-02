@@ -46,9 +46,45 @@ export default function StockOutScreen() {
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
 
   const lowStockThreshold = store?.low_stock_threshold || 10;
+
+  // Get unique sizes and colors from products
+  const uniqueSizes = useMemo(() => {
+    const sizes = new Set<string>();
+    products.forEach(p => {
+      if (p.size) sizes.add(p.size);
+    });
+    return Array.from(sizes).sort();
+  }, [products]);
+
+  const uniqueColors = useMemo(() => {
+    const colors = new Set<string>();
+    products.forEach(p => {
+      if (p.color) colors.add(p.color);
+    });
+    return Array.from(colors).sort();
+  }, [products]);
+
+  const uniqueYears = useMemo(() => {
+    const years = new Set<number>();
+    products.forEach(p => {
+      if (p.year) years.add(p.year);
+    });
+    return Array.from(years).sort((a, b) => b - a); // Descending order
+  }, [products]);
+
+  const SEASONS = [
+    { key: '春', label: '春季' },
+    { key: '夏', label: '夏季' },
+    { key: '秋', label: '秋季' },
+    { key: '冬', label: '冬季' },
+  ];
 
   // Filter and search products
   const filteredProducts = useMemo(() => {
@@ -58,9 +94,13 @@ export default function StockOutScreen() {
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         product.color?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory = !selectedCategoryId || product.category_id === selectedCategoryId;
-      return matchesSearch && matchesCategory;
+      const matchesSize = !selectedSize || product.size === selectedSize;
+      const matchesColor = !selectedColor || product.color === selectedColor;
+      const matchesYear = !selectedYear || product.year === selectedYear;
+      const matchesSeason = !selectedSeason || product.season === selectedSeason;
+      return matchesSearch && matchesCategory && matchesSize && matchesColor && matchesYear && matchesSeason;
     });
-  }, [products, searchQuery, selectedCategoryId]);
+  }, [products, searchQuery, selectedCategoryId, selectedSize, selectedColor, selectedYear, selectedSeason]);
 
   // Paginated products for display
   const displayedProducts = useMemo(() => {
@@ -76,7 +116,7 @@ export default function StockOutScreen() {
   // Reset display count when filter changes
   useEffect(() => {
     setDisplayCount(PAGE_SIZE);
-  }, [searchQuery, selectedCategoryId]);
+  }, [searchQuery, selectedCategoryId, selectedSize, selectedColor, selectedYear, selectedSeason]);
 
   useEffect(() => {
     if (id && products.length > 0) {
@@ -225,6 +265,105 @@ export default function StockOutScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+
+              {/* Size and Color Filters */}
+              <View style={styles.filterRow}>
+                {/* Size Filter */}
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterLabel}>尺码</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={styles.filterChips}>
+                      <TouchableOpacity
+                        style={[styles.filterChip, !selectedSize && styles.filterChipActive]}
+                        onPress={() => setSelectedSize(null)}
+                      >
+                        <Text style={[styles.filterChipText, !selectedSize && styles.filterChipTextActive]}>全部</Text>
+                      </TouchableOpacity>
+                      {uniqueSizes.map((size) => (
+                        <TouchableOpacity
+                          key={size}
+                          style={[styles.filterChip, selectedSize === size && styles.filterChipActive]}
+                          onPress={() => setSelectedSize(size)}
+                        >
+                          <Text style={[styles.filterChipText, selectedSize === size && styles.filterChipTextActive]}>{size}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+
+                {/* Color Filter */}
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterLabel}>颜色</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={styles.filterChips}>
+                      <TouchableOpacity
+                        style={[styles.filterChip, !selectedColor && styles.filterChipActive]}
+                        onPress={() => setSelectedColor(null)}
+                      >
+                        <Text style={[styles.filterChipText, !selectedColor && styles.filterChipTextActive]}>全部</Text>
+                      </TouchableOpacity>
+                      {uniqueColors.map((color) => (
+                        <TouchableOpacity
+                          key={color}
+                          style={[styles.filterChip, selectedColor === color && styles.filterChipActive]}
+                          onPress={() => setSelectedColor(color)}
+                        >
+                          <Text style={[styles.filterChipText, selectedColor === color && styles.filterChipTextActive]}>{color}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+
+                {/* Year Filter */}
+                {uniqueYears.length > 0 && (
+                  <View style={styles.filterGroup}>
+                    <Text style={styles.filterLabel}>年份</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={styles.filterChips}>
+                        <TouchableOpacity
+                          style={[styles.filterChip, !selectedYear && styles.filterChipActive]}
+                          onPress={() => setSelectedYear(null)}
+                        >
+                          <Text style={[styles.filterChipText, !selectedYear && styles.filterChipTextActive]}>全部</Text>
+                        </TouchableOpacity>
+                        {uniqueYears.map((year) => (
+                          <TouchableOpacity
+                            key={year}
+                            style={[styles.filterChip, selectedYear === year && styles.filterChipActive]}
+                            onPress={() => setSelectedYear(year)}
+                          >
+                            <Text style={[styles.filterChipText, selectedYear === year && styles.filterChipTextActive]}>{year}年</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* Season Filter */}
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterLabel}>季度</Text>
+                  <View style={styles.filterChips}>
+                    <TouchableOpacity
+                      style={[styles.filterChip, !selectedSeason && styles.filterChipActive]}
+                      onPress={() => setSelectedSeason(null)}
+                    >
+                      <Text style={[styles.filterChipText, !selectedSeason && styles.filterChipTextActive]}>全部</Text>
+                    </TouchableOpacity>
+                    {SEASONS.map((s) => (
+                      <TouchableOpacity
+                        key={s.key}
+                        style={[styles.filterChip, selectedSeason === s.key && styles.filterChipActive]}
+                        onPress={() => setSelectedSeason(s.key)}
+                      >
+                        <Text style={[styles.filterChipText, selectedSeason === s.key && styles.filterChipTextActive]}>{s.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
 
               {/* Results count */}
               <Text style={styles.resultsCount}>
@@ -548,6 +687,41 @@ const styles = StyleSheet.create({
   },
   categoryButtonTextActive: {
     color: Colors.white,
+  },
+  filterRow: {
+    marginBottom: 8,
+  },
+  filterGroup: {
+    marginBottom: 8,
+  },
+  filterLabel: {
+    fontSize: 12,
+    color: Colors.gray[500],
+    marginBottom: 6,
+  },
+  filterChips: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: Colors.gray[100],
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  filterChipActive: {
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
+  },
+  filterChipText: {
+    fontSize: 12,
+    color: Colors.gray[600],
+  },
+  filterChipTextActive: {
+    color: Colors.primary,
+    fontWeight: '500',
   },
   resultsCount: {
     fontSize: 12,

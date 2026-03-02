@@ -20,7 +20,7 @@
         "NSPhotoLibraryUsageDescription": "需要访问相册以上传商品图片",
         "NSCameraUsageDescription": "需要访问相机以拍摄商品图片"
       },
-      "buildNumber": "8",
+      "buildNumber": "9",
       "appleTeamId": "Y5SP92H4XE"
     },
     "android": {
@@ -31,7 +31,9 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "package": "com.runa.clothsale"
     },
     "web": {
