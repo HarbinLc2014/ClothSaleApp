@@ -9,7 +9,7 @@
     <key>EXUpdatesLaunchWaitMs</key>
     <integer>0</integer>
     <key>EXUpdatesRuntimeVersion</key>
-    <string>carl-production-8</string>
+    <string>carl-production-9</string>
     <key>EXUpdatesURL</key>
     <string>https://u.expo.dev/93f30720-ebe8-41e8-bdb1-a0544b2153b4</string>
   </dict>

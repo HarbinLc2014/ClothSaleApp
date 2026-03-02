@@ -20,7 +20,7 @@
         "NSPhotoLibraryUsageDescription": "需要访问相册以上传商品图片",
         "NSCameraUsageDescription": "需要访问相机以拍摄商品图片"
       },
-      "buildNumber": "7",
+      "buildNumber": "8",
       "appleTeamId": "Y5SP92H4XE"
     },
     "android": {
@@ -59,7 +59,8 @@
         }
       ],
       "./plugins/withFullscreenSplash",
-      "expo-video"
+      "expo-video",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
@@ -67,7 +68,7 @@
     "updates": {
       "url": "https://u.expo.dev/93f30720-ebe8-41e8-bdb1-a0544b2153b4"
     },
-    "runtimeVersion": "carl-production-8",
+    "runtimeVersion": "carl-production-9",
     "extra": {
       "router": {},
       "eas": {

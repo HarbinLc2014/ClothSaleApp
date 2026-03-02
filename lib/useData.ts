@@ -267,13 +267,19 @@ export function useDashboardStats() {
       const totalStock = products?.reduce((sum, p) => sum + p.stock, 0) || 0;
       const totalValue = products?.reduce((sum, p) => sum + (p.stock * p.selling_price), 0) || 0;
 
-      // Fetch today's stats
-      const today = new Date().toISOString().split('T')[0];
-      const { data: todayRecords } = await supabase
+      // Fetch today's stats (use Beijing timezone UTC+8)
+      const now = new Date();
+      const beijingTime = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
+      const today = beijingTime.toISOString().split('T')[0];
+      console.log('[useDashboardStats] Today (Beijing):', today);
+
+      const { data: todayRecords, error: recordsError } = await supabase
         .from('stock_records')
-        .select('type, quantity')
+        .select('type, quantity, created_at')
         .eq('store_id', store.id)
         .gte('created_at', today);
+
+      console.log('[useDashboardStats] Today records:', todayRecords?.length, 'error:', recordsError);
 
       const stockInToday = todayRecords
         ?.filter(r => r.type === '入库')
@@ -283,6 +289,7 @@ export function useDashboardStats() {
         ?.filter(r => r.type !== '入库')
         .reduce((sum, r) => sum + r.quantity, 0) || 0;
 
+      console.log('[useDashboardStats] Stats:', { stockInToday, stockOutToday, totalStock });
       setStats({ totalStock, stockInToday, stockOutToday, totalValue });
 
       // Fetch recent records
@@ -437,7 +444,13 @@ export function useProductMutations() {
   };
 
   const stockOut = async (input: StockOutInput): Promise<{ error: Error | null }> => {
-    if (!store?.id || !profile) return { error: new Error('未找到店铺或用户') };
+    console.log('[stockOut] Called with input:', input);
+    console.log('[stockOut] store:', store?.id, 'profile:', profile?.id);
+
+    if (!store?.id || !profile) {
+      console.log('[stockOut] Missing store or profile');
+      return { error: new Error('未找到店铺或用户') };
+    }
 
     try {
       setLoading(true);
@@ -448,6 +461,8 @@ export function useProductMutations() {
         .select('stock')
         .eq('id', input.product_id)
         .single();
+
+      console.log('[stockOut] Product fetch result:', { product, fetchError });
 
       if (fetchError) throw fetchError;
 
@@ -464,7 +479,12 @@ export function useProductMutations() {
         .update({ stock: stockAfter })
         .eq('id', input.product_id);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.log('[stockOut] Update error:', updateError);
+        throw updateError;
+      }
+
+      console.log('[stockOut] Stock updated successfully, creating record...');
 
       // Create stock record
       const { error: recordError } = await supabase
@@ -483,8 +503,12 @@ export function useProductMutations() {
           note: input.note,
         });
 
-      if (recordError) throw recordError;
+      if (recordError) {
+        console.log('[stockOut] Record error:', recordError);
+        throw recordError;
+      }
 
+      console.log('[stockOut] Success!');
       return { error: null };
     } catch (err) {
       return { error: err as Error };

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,14 +9,35 @@ import {
   SafeAreaView,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Colors } from '@/constants/Colors';
-import { useStockRecords } from '@/lib/useData';
+import { useStockRecords, useCategories } from '@/lib/useData';
+import { getDateRangeStart, getSeasonName, getBeijingNow } from '@/lib/utils';
+
+type TimePeriod = 'day' | 'week' | 'month' | 'quarter' | 'all' | 'custom';
+type RecordType = 'all' | 'in' | 'out';
+
+const TIME_PERIOD_LABELS: Record<TimePeriod, string> = {
+  day: '今日',
+  week: '本周',
+  month: '本月',
+  quarter: '本季度',
+  all: '全部',
+  custom: '自定义',
+};
+
+const YEARS = Array.from({ length: 7 }, (_, i) => 2024 + i); // 2024-2030
+const SEASONS = ['spring', 'summer', 'fall', 'winter'];
 
 function formatDateTime(dateString: string): string {
   const date = new Date(dateString);
-  return date.toLocaleString('zh-CN', {
+  // Convert to Beijing time for display
+  const beijingTime = new Date(date.getTime() + (8 * 60 + date.getTimezoneOffset()) * 60000);
+  return beijingTime.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -26,7 +47,24 @@ function formatDateTime(dateString: string): string {
 }
 
 export default function RecordsScreen() {
-  const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out'>('all');
+  const [activeTab, setActiveTab] = useState<RecordType>('all');
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Custom date range states
+  const [customStartDate, setCustomStartDate] = useState<Date>(() => {
+    const date = getBeijingNow();
+    date.setDate(date.getDate() - 7); // Default to 7 days ago
+    return date;
+  });
+  const [customEndDate, setCustomEndDate] = useState<Date>(() => getBeijingNow());
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  const { categories } = useCategories();
   const { records, loading, refetch } = useStockRecords(activeTab);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -36,30 +74,245 @@ export default function RecordsScreen() {
     setRefreshing(false);
   }, [refetch]);
 
-  const totalStockIn = records.filter((r) => r.type === '入库').reduce((sum, r) => sum + r.quantity, 0);
-  const totalStockOut = records.filter((r) => r.type !== '入库').reduce((sum, r) => sum + r.quantity, 0);
-  const totalSales = records.filter((r) => r.type !== '入库').reduce((sum, r) => sum + r.total_amount, 0);
+  // Format date for display
+  const formatDateDisplay = (date: Date): string => {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+
+  // Handle date picker changes
+  const onStartDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowStartPicker(false);
+    }
+    if (selectedDate) {
+      setCustomStartDate(selectedDate);
+      if (selectedDate > customEndDate) {
+        setCustomEndDate(selectedDate);
+      }
+    }
+  };
+
+  const onEndDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowEndPicker(false);
+    }
+    if (selectedDate) {
+      setCustomEndDate(selectedDate);
+      if (selectedDate < customStartDate) {
+        setCustomStartDate(selectedDate);
+      }
+    }
+  };
+
+  // Filter records based on all criteria
+  const filteredRecords = useMemo(() => {
+    let result = records;
+
+    // Filter by time period
+    if (timePeriod === 'custom') {
+      const startDateStr = formatDateDisplay(customStartDate);
+      const endDate = new Date(customEndDate);
+      endDate.setDate(endDate.getDate() + 1); // Include the end date
+      const endDateStr = formatDateDisplay(endDate);
+      result = result.filter(r => r.created_at >= startDateStr && r.created_at < endDateStr);
+    } else if (timePeriod !== 'all') {
+      const startDate = getDateRangeStart(timePeriod);
+      result = result.filter(r => r.created_at >= startDate);
+    }
+
+    // Filter by category
+    if (selectedCategoryId) {
+      result = result.filter(r => r.product?.category_id === selectedCategoryId);
+    }
+
+    // Filter by year
+    if (selectedYear) {
+      result = result.filter(r => r.product?.year === selectedYear);
+    }
+
+    // Filter by season
+    if (selectedSeason) {
+      result = result.filter(r => r.product?.season === selectedSeason);
+    }
+
+    return result;
+  }, [records, timePeriod, selectedCategoryId, selectedYear, selectedSeason, customStartDate, customEndDate]);
+
+  const totalStockIn = filteredRecords.filter((r) => r.type === '入库').reduce((sum, r) => sum + r.quantity, 0);
+  const totalStockOut = filteredRecords.filter((r) => r.type !== '入库').reduce((sum, r) => sum + r.quantity, 0);
+  const totalSales = filteredRecords.filter((r) => r.type !== '入库').reduce((sum, r) => sum + r.total_amount, 0);
+
+  const activeFiltersCount = [
+    timePeriod !== 'all',
+    selectedCategoryId !== null,
+    selectedYear !== null,
+    selectedSeason !== null,
+  ].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setTimePeriod('all');
+    setSelectedCategoryId(null);
+    setSelectedYear(null);
+    setSelectedSeason(null);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>出入库流水</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>出入库流水</Text>
+          <TouchableOpacity
+            style={[styles.filterToggle, showFilters && styles.filterToggleActive]}
+            onPress={() => setShowFilters(!showFilters)}
+          >
+            <Ionicons name="options-outline" size={18} color={showFilters ? Colors.white : Colors.primary} />
+            <Text style={[styles.filterToggleText, showFilters && styles.filterToggleTextActive]}>
+              筛选{activeFiltersCount > 0 && ` (${activeFiltersCount})`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Time Period Filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timePeriodScroll}>
+          <View style={styles.timePeriodRow}>
+            {(Object.keys(TIME_PERIOD_LABELS) as TimePeriod[]).map((period) => (
+              <TouchableOpacity
+                key={period}
+                style={[styles.timePeriodButton, timePeriod === period && styles.timePeriodButtonActive]}
+                onPress={() => setTimePeriod(period)}
+              >
+                <Text style={[styles.timePeriodText, timePeriod === period && styles.timePeriodTextActive]}>
+                  {TIME_PERIOD_LABELS[period]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        {/* Custom Date Range Picker */}
+        {timePeriod === 'custom' && (
+          <View style={styles.customDateContainer}>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setShowStartPicker(true)}>
+              <Ionicons name="calendar-outline" size={16} color={Colors.primary} />
+              <Text style={styles.dateButtonText}>{formatDateDisplay(customStartDate)}</Text>
+            </TouchableOpacity>
+            <Text style={styles.dateSeparator}>至</Text>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setShowEndPicker(true)}>
+              <Ionicons name="calendar-outline" size={16} color={Colors.primary} />
+              <Text style={styles.dateButtonText}>{formatDateDisplay(customEndDate)}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Expandable Filters */}
+        {showFilters && (
+          <View style={styles.filtersContainer}>
+            {/* Category Filter */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>商品类别</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.filterOptions}>
+                  <TouchableOpacity
+                    style={[styles.filterChip, !selectedCategoryId && styles.filterChipActive]}
+                    onPress={() => setSelectedCategoryId(null)}
+                  >
+                    <Text style={[styles.filterChipText, !selectedCategoryId && styles.filterChipTextActive]}>
+                      全部
+                    </Text>
+                  </TouchableOpacity>
+                  {categories.map((cat) => (
+                    <TouchableOpacity
+                      key={cat.id}
+                      style={[styles.filterChip, selectedCategoryId === cat.id && styles.filterChipActive]}
+                      onPress={() => setSelectedCategoryId(cat.id)}
+                    >
+                      <Text style={[styles.filterChipText, selectedCategoryId === cat.id && styles.filterChipTextActive]}>
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+
+            {/* Year Filter */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>进货年份</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.filterOptions}>
+                  <TouchableOpacity
+                    style={[styles.filterChip, !selectedYear && styles.filterChipActive]}
+                    onPress={() => setSelectedYear(null)}
+                  >
+                    <Text style={[styles.filterChipText, !selectedYear && styles.filterChipTextActive]}>
+                      全部
+                    </Text>
+                  </TouchableOpacity>
+                  {YEARS.map((year) => (
+                    <TouchableOpacity
+                      key={year}
+                      style={[styles.filterChip, selectedYear === year && styles.filterChipActive]}
+                      onPress={() => setSelectedYear(year)}
+                    >
+                      <Text style={[styles.filterChipText, selectedYear === year && styles.filterChipTextActive]}>
+                        {year}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+
+            {/* Season Filter */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>进货季度</Text>
+              <View style={styles.filterOptions}>
+                <TouchableOpacity
+                  style={[styles.filterChip, !selectedSeason && styles.filterChipActive]}
+                  onPress={() => setSelectedSeason(null)}
+                >
+                  <Text style={[styles.filterChipText, !selectedSeason && styles.filterChipTextActive]}>
+                    全部
+                  </Text>
+                </TouchableOpacity>
+                {SEASONS.map((season) => (
+                  <TouchableOpacity
+                    key={season}
+                    style={[styles.filterChip, selectedSeason === season && styles.filterChipActive]}
+                    onPress={() => setSelectedSeason(season)}
+                  >
+                    <Text style={[styles.filterChipText, selectedSeason === season && styles.filterChipTextActive]}>
+                      {getSeasonName(season)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {activeFiltersCount > 0 && (
+              <TouchableOpacity style={styles.clearFiltersButton} onPress={clearFilters}>
+                <Ionicons name="close-circle" size={16} color={Colors.gray[500]} />
+                <Text style={styles.clearFiltersText}>清除筛选</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: Colors.greenLight }]}>
-            <Text style={styles.statLabel}>总入库</Text>
+            <Text style={styles.statLabel}>入库</Text>
             <Text style={styles.statValueGreen}>{totalStockIn}</Text>
             <Text style={styles.statUnit}>件</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: Colors.orangeLight }]}>
-            <Text style={[styles.statLabel, { color: Colors.orange }]}>总出库</Text>
+            <Text style={[styles.statLabel, { color: Colors.orange }]}>出库</Text>
             <Text style={styles.statValueOrange}>{totalStockOut}</Text>
             <Text style={[styles.statUnit, { color: Colors.orange }]}>件</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: Colors.primaryLight }]}>
-            <Text style={styles.statLabelPink}>总销售额</Text>
+            <Text style={styles.statLabelPink}>销售额</Text>
             <Text style={styles.statValuePink}>¥{totalSales.toLocaleString()}</Text>
           </View>
         </View>
@@ -100,10 +353,14 @@ export default function RecordsScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
           }
         >
-          <Text style={styles.listCount}>共 {records.length} 条记录</Text>
+          <Text style={styles.listCount}>
+            共 {filteredRecords.length} 条记录
+            {activeFiltersCount > 0 && ` (已筛选)`}
+          </Text>
 
-          {records.map((record) => {
+          {filteredRecords.map((record) => {
             const isStockIn = record.type === '入库';
+            const displayImage = record.product?.image_urls?.[0] || record.product?.image_url || record.product?.video_thumbnails?.[0];
             return (
               <View key={record.id} style={styles.recordCard}>
                 <View style={[styles.recordIcon, isStockIn ? styles.stockInIcon : styles.stockOutIcon]}>
@@ -114,9 +371,9 @@ export default function RecordsScreen() {
                   />
                 </View>
 
-                {(record.product?.image_urls?.[0] || record.product?.image_url) ? (
+                {displayImage ? (
                   <Image
-                    source={{ uri: record.product?.image_urls?.[0] || record.product?.image_url }}
+                    source={{ uri: displayImage }}
                     style={styles.recordImage}
                     resizeMode="cover"
                   />
@@ -150,6 +407,8 @@ export default function RecordsScreen() {
                   </Text>
                   <Text style={styles.recordMeta}>
                     {record.product?.size || '-'} | {record.product?.color || '-'}
+                    {record.product?.year && ` | ${record.product.year}年`}
+                    {record.product?.season && ` ${getSeasonName(record.product.season)}`}
                   </Text>
                   <View style={styles.recordFooter}>
                     <View style={styles.recordTime}>
@@ -163,17 +422,97 @@ export default function RecordsScreen() {
             );
           })}
 
-          {records.length === 0 && (
+          {filteredRecords.length === 0 && (
             <View style={styles.emptyState}>
               <View style={styles.emptyIcon}>
                 <Ionicons name="trending-up" size={32} color={Colors.gray[400]} />
               </View>
               <Text style={styles.emptyText}>暂无记录</Text>
+              {activeFiltersCount > 0 && (
+                <TouchableOpacity onPress={clearFilters}>
+                  <Text style={styles.emptyLink}>清除筛选条件</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
           <View style={{ height: 20 }} />
         </ScrollView>
+      )}
+
+      {/* Date Picker Modals */}
+      {Platform.OS === 'ios' ? (
+        <>
+          <Modal
+            visible={showStartPicker}
+            transparent
+            animationType="slide"
+          >
+            <View style={styles.datePickerModal}>
+              <View style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <Text style={styles.datePickerTitle}>选择开始日期</Text>
+                  <TouchableOpacity onPress={() => setShowStartPicker(false)}>
+                    <Text style={styles.datePickerDone}>完成</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={customStartDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={onStartDateChange}
+                  maximumDate={new Date()}
+                  locale="zh-CN"
+                />
+              </View>
+            </View>
+          </Modal>
+          <Modal
+            visible={showEndPicker}
+            transparent
+            animationType="slide"
+          >
+            <View style={styles.datePickerModal}>
+              <View style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <Text style={styles.datePickerTitle}>选择结束日期</Text>
+                  <TouchableOpacity onPress={() => setShowEndPicker(false)}>
+                    <Text style={styles.datePickerDone}>完成</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={customEndDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={onEndDateChange}
+                  maximumDate={new Date()}
+                  locale="zh-CN"
+                />
+              </View>
+            </View>
+          </Modal>
+        </>
+      ) : (
+        <>
+          {showStartPicker && (
+            <DateTimePicker
+              value={customStartDate}
+              mode="date"
+              display="default"
+              onChange={onStartDateChange}
+              maximumDate={new Date()}
+            />
+          )}
+          {showEndPicker && (
+            <DateTimePicker
+              value={customEndDate}
+              mode="date"
+              display="default"
+              onChange={onEndDateChange}
+              maximumDate={new Date()}
+            />
+          )}
+        </>
       )}
     </SafeAreaView>
   );
@@ -197,16 +536,117 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.gray[100],
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   title: {
     fontSize: 20,
     fontWeight: '600',
     color: Colors.gray[900],
-    marginBottom: 16,
+  },
+  filterToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.primaryLight,
+  },
+  filterToggleActive: {
+    backgroundColor: Colors.primary,
+  },
+  filterToggleText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '500',
+  },
+  filterToggleTextActive: {
+    color: Colors.white,
+  },
+  timePeriodScroll: {
+    marginBottom: 12,
+    marginHorizontal: -20,
+  },
+  timePeriodRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
+  },
+  timePeriodButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.gray[100],
+  },
+  timePeriodButtonActive: {
+    backgroundColor: Colors.primary,
+  },
+  timePeriodText: {
+    fontSize: 13,
+    color: Colors.gray[600],
+  },
+  timePeriodTextActive: {
+    color: Colors.white,
+    fontWeight: '500',
+  },
+  filtersContainer: {
+    backgroundColor: Colors.gray[50],
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  filterSection: {
+    marginBottom: 12,
+  },
+  filterLabel: {
+    fontSize: 12,
+    color: Colors.gray[500],
+    marginBottom: 8,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.gray[200],
+  },
+  filterChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterChipText: {
+    fontSize: 12,
+    color: Colors.gray[600],
+  },
+  filterChipTextActive: {
+    color: Colors.white,
+    fontWeight: '500',
+  },
+  clearFiltersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 8,
+  },
+  clearFiltersText: {
+    fontSize: 13,
+    color: Colors.gray[500],
   },
   statsRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statCard: {
     flex: 1,
@@ -245,7 +685,7 @@ const styles = StyleSheet.create({
   tabs: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   tab: {
     flex: 1,
@@ -425,5 +865,67 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 15,
     color: Colors.gray[500],
+  },
+  emptyLink: {
+    fontSize: 14,
+    color: Colors.primary,
+    marginTop: 8,
+  },
+  customDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  dateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  dateButtonText: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '500',
+  },
+  dateSeparator: {
+    fontSize: 14,
+    color: Colors.gray[500],
+  },
+  datePickerModal: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  datePickerContainer: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 34,
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray[100],
+  },
+  datePickerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.gray[900],
+  },
+  datePickerDone: {
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: '500',
   },
 });

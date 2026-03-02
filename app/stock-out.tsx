@@ -89,14 +89,18 @@ export default function StockOutScreen() {
   }, [id, products]);
 
   const handleSubmit = async () => {
+    console.log('[stock-out] handleSubmit called');
     setError('');
 
     if (!selectedProduct) {
+      console.log('[stock-out] No product selected');
       setError('请选择商品');
       return;
     }
 
     const quantity = parseInt(formData.quantity);
+    console.log('[stock-out] Quantity:', quantity, 'formData:', formData);
+
     if (!quantity || quantity <= 0) {
       setError('请输入有效的出库数量');
       return;
@@ -107,6 +111,13 @@ export default function StockOutScreen() {
       return;
     }
 
+    console.log('[stock-out] Calling stockOut with:', {
+      product_id: selectedProduct.id,
+      quantity,
+      unit_price: parseFloat(formData.price) || selectedProduct.selling_price,
+      type: formData.type,
+    });
+
     const { error: stockOutError } = await stockOut({
       product_id: selectedProduct.id,
       quantity,
@@ -114,6 +125,8 @@ export default function StockOutScreen() {
       type: formData.type,
       note: formData.note.trim() || undefined,
     });
+
+    console.log('[stock-out] stockOut result:', stockOutError ? stockOutError.message : 'success');
 
     if (stockOutError) {
       setError(stockOutError.message);
@@ -406,11 +419,15 @@ export default function StockOutScreen() {
         </ScrollView>
 
         {/* Submit Button */}
-        <View style={styles.submitContainer}>
+        <View style={styles.submitContainer} pointerEvents="box-none">
           <TouchableOpacity
             style={[styles.submitButton, mutationLoading && styles.submitButtonDisabled]}
-            onPress={handleSubmit}
+            onPress={() => {
+              console.log('[stock-out] Button pressed!');
+              handleSubmit();
+            }}
             disabled={mutationLoading}
+            activeOpacity={0.7}
           >
             {mutationLoading ? (
               <ActivityIndicator color={Colors.white} />
@@ -785,6 +802,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.gray[200],
     padding: 16,
+    paddingBottom: 32,
+    zIndex: 100,
     paddingBottom: 32,
   },
   submitButton: {
